@@ -4,7 +4,12 @@ from passlib.context import CryptContext
 from jose import jwt
 from datetime import datetime, timedelta
 
+from routers import kiosk, booth
+
 app = FastAPI()
+
+app.include_router(kiosk.router)  # 외부 키오스크 연결
+app.include_router(booth.router)  # 내부 부스 연결
 
 # ==========================================
 # 1. 설정 (보안 관련)
@@ -12,85 +17,94 @@ app = FastAPI()
 # 비밀번호 암호화 도구
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# JWT 토큰 설정 (임시 비밀키, 실무에선 절대 이렇게 공개하면 안 됨!)
+# JWT 토큰 설정
 SECRET_KEY = "my_super_secret_key_singpick"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30  # 토큰 유효시간 30분
+ACCESS_TOKEN_EXPIRE_MINUTES = 30 
 
 # ==========================================
 # 2. 핵심 함수들 (암호화, 토큰 생성)
 # ==========================================
-# (1) 비밀번호 검증 함수: 사용자가 입력한 비번 vs DB에 저장된 암호화 비번 비교
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
-# (2) 비밀번호 암호화 함수
 def get_password_hash(password):
     return pwd_context.hash(password)
 
-# (3) JWT 토큰 생성 함수 (자유이용권 발급기)
 def create_access_token(data: dict):
     to_encode = data.copy()
-    # 유효기간 설정 (현재시간 + 30분)
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
-    # 토큰 암호화해서 생성
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
 # ==========================================
-# 3. 데이터 모델 (주문서 양식)
+# 3. 데이터 모델 (설계서 반영!)
 # ==========================================
+
 class UserCreate(BaseModel):
-    email: str
+    name: str           # 사용자 이름 (예: 홍길동)
+    phone: str          # 전화번호 (예: 01012345678) - 이게 아이디 역할
+    password: str       # 비밀번호 (숫자 6자리)
+
+class UserLogin(BaseModel):
+    phone: str          # 로그인할 때도 전화번호 사용
     password: str
 
-# 가짜 DB (아직 진짜 DB가 없으니 리스트에 저장)
+# 가짜 DB (메모리에 임시 저장)
 fake_users_db = {}
 
 # ==========================================
-# 4. API (기능)
+# 4. API (키오스크에서 이 주소로 데이터를 보냄)
 # ==========================================
 
 @app.get("/")
 def read_root():
-    return {"status": "success", "message": "Hello World"}
+    return {"status": "success", "message": "SingPick Server Running"}
 
-# 회원가입 (비밀번호 암호화해서 저장)
-@app.post("/signup")
+# [회원가입 API]
+@app.post("/signup", tags=["Auth (회원가입/로그인)"])
 def signup(user: UserCreate):
-    # 이미 있는 이메일인지 확인
-    if user.email in fake_users_db:
-        raise HTTPException(status_code=400, detail="이미 가입된 이메일입니다.")
+    # 1. 이미 가입된 번호인지 확인
+    if user.phone in fake_users_db:
+        raise HTTPException(status_code=400, detail="이미 가입된 전화번호입니다.")
     
+    # 2. 비밀번호 암호화
     hashed_password = get_password_hash(user.password)
-    # 가짜 DB에 저장
-    fake_users_db[user.email] = {
-        "email": user.email,
+    
+    # 3. DB에 저장
+    fake_users_db[user.phone] = {
+        "name": user.name,
+        "phone": user.phone,
         "password": hashed_password
     }
     
-    return {"status": "success", "message": "회원가입 완료", "user": user.email}
+    return {
+        "status": "success", 
+        "message": f"{user.name}님 회원가입 완료! (키오스크 가입)", 
+        "user_phone": user.phone
+    }
 
-# [cite_start]로그인 (아이디/비번 확인 후 토큰 발급) [cite: 10]
-@app.post("/login")
-def login(user: UserCreate):
-    # 1. 이메일이 있는지 확인
-    db_user = fake_users_db.get(user.email)
+# [로그인 API] - 키오스크에서 '회원' 버튼 누르고 입력했을 때
+@app.post("/login", tags=["Auth (회원가입/로그인)"])
+def login(user: UserLogin):
+    # 1. 아이디(전화번호)가 있는지 확인
+    db_user = fake_users_db.get(user.phone)
     if not db_user:
-        raise HTTPException(status_code=400, detail="이메일 또는 비밀번호가 틀렸습니다.")
+        raise HTTPException(status_code=400, detail="가입되지 않은 전화번호입니다.")
     
     # 2. 비밀번호가 맞는지 확인
     if not verify_password(user.password, db_user["password"]):
-        raise HTTPException(status_code=400, detail="이메일 또는 비밀번호가 틀렸습니다.")
+        raise HTTPException(status_code=400, detail="비밀번호가 틀렸습니다.")
     
-    # 3. 다 맞으면 토큰 발급
-    access_token = create_access_token(data={"sub": user.email})
+    # 3. 입장권(토큰) 발급
+    access_token = create_access_token(data={"sub": user.phone})
     
     return {
         "status": "success",
         "data": {
             "access_token": access_token,
-            "token_type": "bearer"
+            "token_type": "bearer",
+            "user_name": db_user["name"] # 환영 인사를 위해 이름도 같이 보내줌
         }
     }
