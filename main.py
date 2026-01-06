@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 from routers import kiosk, booth
 
+
 app = FastAPI()
 
 app.include_router(kiosk.router)  # 외부 키오스크 연결
@@ -60,7 +61,7 @@ fake_users_db = {}
 
 @app.get("/")
 def read_root():
-    return {"status": "success", "message": "SingPick Server Running"}
+    return {"status": "success", "message": "Hello world"}
 
 # [회원가입 API]
 @app.post("/signup", tags=["Auth (회원가입/로그인)"])
@@ -105,6 +106,6 @@ def login(user: UserLogin):
         "data": {
             "access_token": access_token,
             "token_type": "bearer",
-            "user_name": db_user["name"] # 환영 인사를 위해 이름도 같이 보내줌
+            "user_name": db_user["name"] 
         }
     }
