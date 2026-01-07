@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 
 from routers import kiosk, booth
 
-
 app = FastAPI()
 
 app.include_router(kiosk.router)  # 외부 키오스크 연결
@@ -40,16 +39,15 @@ def create_access_token(data: dict):
     return encoded_jwt
 
 # ==========================================
-# 3. 데이터 모델 (설계서 반영!)
+# 3. 데이터 모델 (수정됨)
 # ==========================================
-
 class UserCreate(BaseModel):
-    name: str           # 사용자 이름 (예: 홍길동)
-    phone: str          # 전화번호 (예: 01012345678) - 이게 아이디 역할
-    password: str       # 비밀번호 (숫자 6자리)
+    user_id: str        
+    phone: str        
+    password: str       
 
 class UserLogin(BaseModel):
-    phone: str          # 로그인할 때도 전화번호 사용
+    phone: str        
     password: str
 
 # 가짜 DB (메모리에 임시 저장)
@@ -61,7 +59,7 @@ fake_users_db = {}
 
 @app.get("/")
 def read_root():
-    return {"status": "success", "message": "Hello world"}
+    return {"status": "success", "message": "SingPick Server Running"}
 
 # [회원가입 API]
 @app.post("/signup", tags=["Auth (회원가입/로그인)"])
@@ -73,16 +71,16 @@ def signup(user: UserCreate):
     # 2. 비밀번호 암호화
     hashed_password = get_password_hash(user.password)
     
-    # 3. DB에 저장
+    # 3. DB에 저장 (이름 대신 user_id 저장)
     fake_users_db[user.phone] = {
-        "name": user.name,
+        "user_id": user.user_id,   # [변경] 영문 ID 저장
         "phone": user.phone,
         "password": hashed_password
     }
     
     return {
         "status": "success", 
-        "message": f"{user.name}님 회원가입 완료! (키오스크 가입)", 
+        "message": f"Welcome {user.user_id}! Signup Complete.", # [변경] 메시지도 영어로 통일
         "user_phone": user.phone
     }
 
@@ -92,11 +90,11 @@ def login(user: UserLogin):
     # 1. 아이디(전화번호)가 있는지 확인
     db_user = fake_users_db.get(user.phone)
     if not db_user:
-        raise HTTPException(status_code=400, detail="가입되지 않은 전화번호입니다.")
+        raise HTTPException(status_code=400, detail="User not found.") # [변경] 에러 메시지 영문화
     
     # 2. 비밀번호가 맞는지 확인
     if not verify_password(user.password, db_user["password"]):
-        raise HTTPException(status_code=400, detail="비밀번호가 틀렸습니다.")
+        raise HTTPException(status_code=400, detail="Incorrect password.") # [변경] 에러 메시지 영문화
     
     # 3. 입장권(토큰) 발급
     access_token = create_access_token(data={"sub": user.phone})
@@ -106,6 +104,6 @@ def login(user: UserLogin):
         "data": {
             "access_token": access_token,
             "token_type": "bearer",
-            "user_name": db_user["name"] 
+            "user_id": db_user["user_id"] # 로그인 성공 시 영문 ID 반환
         }
     }
