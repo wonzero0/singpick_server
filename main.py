@@ -4,6 +4,8 @@ from passlib.context import CryptContext
 from jose import jwt
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field, field_validator
+import re 
 
 # [중요] 우리가 만든 파일들 불러오기
 from routers import kiosk, booth
@@ -42,10 +44,18 @@ def create_access_token(data: dict):
 
 # 4. 데이터 모델 (입력받는 양식)
 class UserCreate(BaseModel):
-    user_id: str
-    phone: str
-    password: str
+    user_id: str = Field(..., pattern=r"^[a-zA-Z]{4,20}$", description="4~20자 영문 전용")
+    
+    phone: str = Field(..., pattern=r"^010\d{8}$", description="010XXXXXXXX")
+    
+    password: str = Field(..., pattern=r"^\d{1,6}$", description="숫자 1~6자리")
 
+    @field_validator('user_id')
+    def validate_user_id(cls, v):
+        if not v.isalpha(): 
+            raise ValueError('아이디는 숫자가 포함될 수 없으며, 오직 영문만 가능합니다.')
+        return v
+    
 class UserLogin(BaseModel):
     phone: str
     password: str
