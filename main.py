@@ -1,30 +1,32 @@
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Depends
 from pydantic import BaseModel
 from passlib.context import CryptContext
 from jose import jwt
 from datetime import datetime, timedelta
+from sqlalchemy.orm import Session
 
+# [중요] 우리가 만든 파일들 불러오기
 from routers import kiosk, booth
+import models
+from database import engine, get_db
+
+# 1. 서버 시작할 때 DB 테이블 만들기
+models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-app.include_router(kiosk.router)  # 외부 키오스크 연결
-app.include_router(booth.router)  # 내부 부스 연결
+# 라우터 연결
+app.include_router(kiosk.router)
+app.include_router(booth.router)
 
-# ==========================================
-# 1. 설정 (보안 관련)
-# ==========================================
-# 비밀번호 암호화 도구
+# 2. 설정 (보안 관련)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# JWT 토큰 설정
 SECRET_KEY = "my_super_secret_key_singpick"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30 
 
-# ==========================================
-# 2. 핵심 함수들 (암호화, 토큰 생성)
-# ==========================================
+
+# 3. 핵심 함수들
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
@@ -38,65 +40,65 @@ def create_access_token(data: dict):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-# ==========================================
-# 3. 데이터 모델 (수정됨)
-# ==========================================
+# 4. 데이터 모델 (입력받는 양식)
 class UserCreate(BaseModel):
-    user_id: str        
-    phone: str        
-    password: str       
-
-class UserLogin(BaseModel):
-    phone: str        
+    user_id: str
+    phone: str
     password: str
 
-# 가짜 DB (메모리에 임시 저장)
-fake_users_db = {}
+class UserLogin(BaseModel):
+    phone: str
+    password: str
 
-# ==========================================
-# 4. API (키오스크에서 이 주소로 데이터를 보냄)
-# ==========================================
 
+# 5. API
 @app.get("/")
 def read_root():
-    return {"status": "success", "message": "SingPick Server Running"}
+    return {"status": "success", "message": "SingPick Server Running with MySQL"}
 
 # [회원가입 API]
 @app.post("/signup", tags=["Auth (회원가입/로그인)"])
-def signup(user: UserCreate):
-    # 1. 이미 가입된 번호인지 확인
-    if user.phone in fake_users_db:
+def signup(user: UserCreate, db: Session = Depends(get_db)):
+    # 1. 이미 가입된 번호인지 DB에서 조회 (SQL: SELECT * FROM users WHERE phone = ...)
+    db_user = db.query(models.User).filter(models.User.phone == user.phone).first()
+    
+    if db_user:
         raise HTTPException(status_code=400, detail="이미 가입된 전화번호입니다.")
     
-    # 2. 비밀번호 암호화
+    # 2. 비밀번호 암호화 및 저장
     hashed_password = get_password_hash(user.password)
     
-    # 3. DB에 저장 (이름 대신 user_id 저장)
-    fake_users_db[user.phone] = {
-        "user_id": user.user_id,   # [변경] 영문 ID 저장
-        "phone": user.phone,
-        "password": hashed_password
-    }
+    # 3. DB 모델(설계도)에 데이터 채우기
+    new_user = models.User(
+        user_id=user.user_id,
+        phone=user.phone,
+        password=hashed_password
+    )
+    
+    # 4. 진짜 저장 (Commit)
+    db.add(new_user)
+    db.commit()
     
     return {
         "status": "success", 
-        "message": f"Welcome {user.user_id}! Signup Complete.", # [변경] 메시지도 영어로 통일
+        "message": f"Welcome {user.user_id}! Signup Complete.",
         "user_phone": user.phone
     }
 
-# [로그인 API] - 키오스크에서 '회원' 버튼 누르고 입력했을 때
+# [로그인 API]
 @app.post("/login", tags=["Auth (회원가입/로그인)"])
-def login(user: UserLogin):
-    # 1. 아이디(전화번호)가 있는지 확인
-    db_user = fake_users_db.get(user.phone)
+def login(user: UserLogin, db: Session = Depends(get_db)):
+    # 1. DB에서 전화번호로 찾기
+    db_user = db.query(models.User).filter(models.User.phone == user.phone).first()
+    
     if not db_user:
-        raise HTTPException(status_code=400, detail="User not found.") # [변경] 에러 메시지 영문화
+        raise HTTPException(status_code=400, detail="User not found.")
     
-    # 2. 비밀번호가 맞는지 확인
-    if not verify_password(user.password, db_user["password"]):
-        raise HTTPException(status_code=400, detail="Incorrect password.") # [변경] 에러 메시지 영문화
+    # 2. 비밀번호 확인 (DB에 있는 암호화된 비번과 비교)
+    if not verify_password(user.password, db_user.password):
+        raise HTTPException(status_code=400, detail="Incorrect password.")
     
-    # 3. 입장권(토큰) 발급
+    # 3. 토큰 발급
     access_token = create_access_token(data={"sub": user.phone})
     
     return {
@@ -104,6 +106,6 @@ def login(user: UserLogin):
         "data": {
             "access_token": access_token,
             "token_type": "bearer",
-            "user_id": db_user["user_id"] # 로그인 성공 시 영문 ID 반환
+            "user_id": db_user.user_id
         }
     }
