@@ -1,39 +1,57 @@
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from database import get_db
+import models
 
-# 이 파일은 '부스 내부' 기능만 모아두는 곳입니다.
-# [중요] 여기에 'import kiosk' 같은 게 있으면 안 됩니다!
+# 라우터 이름표 붙이기 (URL 앞에 /booth가 자동으로 붙음)
+router = APIRouter(prefix="/booth", tags=["Booth (노래방 부스 관리)"])
 
-router = APIRouter(prefix="/booth", tags=["Internal Booth (내부 부스)"])
+# 1. 모든 방 목록 조회 (GET /booth/)
+@router.get("/")
+def get_all_booths(db: Session = Depends(get_db)):
+    # DB 명령: SELECT * FROM booths;
+    booths = db.query(models.Booth).all()
+    return {"status": "success", "data": booths}
 
-# 분석 요청 데이터 양식
-class AnalyzeRequest(BaseModel):
-    user_email: str | None = None
-    song_title: str
-    audio_file_path: str  # 녹음된 파일 위치 (나중에 실제 파일 전송으로 변경)
+# 2. 특정 방 상태 조회 (GET /booth/1) - 나중에 쓸 수 있음
+@router.get("/{booth_id}")
+def get_booth_status(booth_id: int, db: Session = Depends(get_db)):
+    # DB 명령: SELECT * FROM booths WHERE booth_id = ...
+    booth = db.query(models.Booth).filter(models.Booth.booth_id == booth_id).first()
+    
+    if not booth:
+        return {"status": "error", "message": "존재하지 않는 방입니다."}
+    
+    return {"status": "success", "data": booth}
 
-# 1. 가사 불러오기 API
-@router.get("/lyrics/{song_title}")
-def get_lyrics(song_title: str):
-    # 나중에 DB에서 진짜 가사를 가져옵니다.
-    return {
-        "song": song_title,
-        "lyrics": [
-            {"time": 12.5, "text": "가사 첫 줄 예시"},
-            {"time": 18.2, "text": "가사 두 번째 줄 예시"}
-        ]
-    }
+# 3. 방 사용 시작 (POST /booth/1/start)
+@router.post("/{booth_id}/start")
+def start_use_booth(booth_id: int, db: Session = Depends(get_db)):
+    booth = db.query(models.Booth).filter(models.Booth.booth_id == booth_id).first()
+    
+    if not booth:
+        return {"status": "error", "message": "존재하지 않는 방입니다."}
 
-# 2. AI 분석 요청 API
-@router.post("/analyze")
-def analyze_song(request: AnalyzeRequest):
-    # 여기서 3번 팀원의 AI 코드를 호출하게 됩니다.
-    return {
-        "status": "processing",
-        "message": "AI 분석이 시작되었습니다.",
-        "result": {
-            "score": 95,          # 임시 점수
-            "pitch_accuracy": "High",
-            "feedback": "고음 처리가 아주 좋습니다!" # 회원 데이터 업데이트용 피드백
-        }
-    }
+    if booth.status == "busy":
+        return {"status": "error", "message": "이미 사용 중인 방입니다."}
+
+    booth.status = "busy"
+    db.commit() 
+
+    return {"status": "success", "message": f"{booth_id}번 방 사용을 시작합니다.", "current_status": "busy"}
+
+# 4. 방 사용 종료 (POST /booth/1/end)
+@router.post("/{booth_id}/end")
+def finish_use_booth(booth_id: int, db: Session = Depends(get_db)):
+    booth = db.query(models.Booth).filter(models.Booth.booth_id == booth_id).first()
+    
+    if not booth:
+        return {"status": "error", "message": "존재하지 않는 방입니다."}
+    
+    if booth.status == "empty":
+        return {"status": "error", "message": "이미 빈 방입니다."}
+
+    booth.status = "empty"
+    db.commit()
+
+    return {"status": "success", "message": f"{booth_id}번 방 사용을 종료합니다.", "current_status": "empty"}
