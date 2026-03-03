@@ -1,4 +1,3 @@
-# routers/users.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, field_validator
@@ -7,13 +6,13 @@ import models
 import bleach
 from utils import aes_encrypt 
 
-# 1. 태그(이름표)를 달아서 라우터 생성
+# 1. 라우터 생성
 router = APIRouter(
     prefix="/users",
     tags=["👤 Users (회원관리)"] 
 )
 
-# 2. Pydantic 모델 (검증 틀) - main.py에서 가져옴
+# 2. Pydantic 모델
 class UserCreate(BaseModel):
     user_id: str = Field(..., pattern=r"^[a-zA-Z]{4,20}$")
     phone: str = Field(..., pattern=r"^010\d{8}$")
@@ -25,7 +24,7 @@ class UserCreate(BaseModel):
             raise ValueError('아이디는 오직 영문만 가능합니다.')
         return v
 
-# 3. 회원가입 API (설명 추가됨)
+# 3. 회원가입 API 
 @router.post("/signup", summary="회원가입", description="아이디, 비밀번호, 전화번호(AES암호화)를 받아 회원을 생성합니다.")
 def signup(user: UserCreate, db: Session = Depends(get_db)):
     # 전화번호 암호화
@@ -53,3 +52,30 @@ def signup(user: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     
     return {"status": "success", "message": f"Welcome {clean_user_id}! Signup Complete."}
+
+# 4. 로그인 
+class UserLogin(BaseModel):
+    user_id: str
+    password: str
+
+@router.post("/login", summary="로그인", description="아이디와 비밀번호를 확인하여 로그인을 처리합니다.")
+def login(user_data: UserLogin, db: Session = Depends(get_db)):
+    # 1. DB에서 해당 아이디의 유저 찾기
+    db_user = db.query(models.User).filter(models.User.user_id == user_data.user_id).first()
+    
+    # 2. 유저가 없거나 비밀번호가 틀린 경우
+    if not db_user or db_user.password != user_data.password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="아이디 또는 비밀번호가 일치하지 않습니다."
+        )
+    
+    # 3. 로그인 성공 시 응답
+    return {
+        "status": "success",
+        "message": f"안녕하세요, {db_user.user_id}님! 로그인에 성공했습니다.",
+        "user_info": {
+            "user_id": db_user.user_id,
+            "phone": db_user.phone  # 암호화된 상태로 반환됨
+        }
+    }
