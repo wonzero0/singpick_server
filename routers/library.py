@@ -21,7 +21,7 @@ def search_song(keyword: str, db: Session = Depends(get_db)):
 
 # 2. 노래 예약 API
 @router.post("/reserve", summary="노래 예약", description="부스 번호와 노래방 번호(TJ 번호)를 받아 예약합니다.")
-def reserve_song(booth_id: int, tj_number: int, db: Session = Depends(get_db)): # song_id -> tj_number 로 변수명 변경
+def reserve_song(booth_id: int, tj_number: int, db: Session = Depends(get_db)): 
     
     # 1. 노래 찾기 (tj_number로 검색!)
     song = db.query(models.Song).filter(models.Song.tj_number == tj_number).first()
@@ -40,7 +40,6 @@ def reserve_song(booth_id: int, tj_number: int, db: Session = Depends(get_db)): 
 
     return {"status": "success", "message": f"[{song.title}] 예약되었습니다. (방: {booth_id}번)"}
 
-    return {"status": "success", "message": f"[{song.title}] 예약되었습니다. (방: {booth_id}번)"}
 
 # 3. 예약 목록 조회 (현재 대기 중인 곡)
 @router.get("/reservations/{booth_id}", summary="예약 목록 확인")
