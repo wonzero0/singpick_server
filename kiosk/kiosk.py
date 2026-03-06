@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QGridLayout, QStackedWidget
 )
 from PyQt6.QtCore import Qt, QTimer
-
+import requests
 
 # ================= 키보드 =================
 class NumberKeyboard(QWidget):
@@ -395,12 +395,46 @@ class SignUpPage(QWidget):
         self.kb_box.addWidget(self.num_kb)
 
     def submit(self):
-        if (
-            self.user_id_input.text().isalpha() and
-            self.password_input.text().isdigit() and len(self.password_input.text()) == 6 and
-            self.phone_input.text().isdigit() and len(self.phone_input.text()) == 11
-        ):
-            self.go_home()
+        # 1. 입력값 가져오기
+        user_id = self.user_id_input.text().strip()
+        phone = self.phone_input.text().strip()
+        password = self.password_input.text().strip()
+
+        # 2. 유효성 검사 (서버 에러 방지용)
+        # 아이디가 영어로만 4~20자인지 체크 (숫자 섞이면 서버에서 422 에러 남)
+        if not (user_id.isalpha() and 4 <= len(user_id) <= 20):
+            print(f"오류: 아이디 '{user_id}'는 영문 4~20자만 가능합니다.")
+            return
+
+        if len(phone) != 11 or not phone.isdigit():
+            print("오류: 전화번호 11자리를 입력하세요.")
+            return
+
+        if len(password) != 6 or not password.isdigit():
+            print("오류: 비밀번호 6자리를 입력하세요.")
+            return
+
+        # 3. 서버로 보낼 데이터 뭉치 만들기
+        payload = {
+            "user_id": user_id,
+            "phone": phone,
+            "password": password
+        }
+
+        try:
+            # 4. 서버(main.py)에 데이터 쏘기
+            url = "http://127.0.0.1:8000/users/signup"
+            response = requests.post(url, json=payload)
+
+            if response.status_code == 200:
+                print("✅ 회원가입 성공!")
+                self.go_home() # 성공하면 홈으로
+            else:
+                # 서버에서 보낸 에러 메시지 출력 (중복 가입 등)
+                print(f"❌ 가입 실패: {response.json()}")
+                
+        except Exception as e:
+            print(f"📡 서버 연결 실패 (서버가 켜져있나요?): {e}")
 
 
 # ================= 회원 로그인 =================
@@ -523,13 +557,145 @@ class LoginPage(QWidget):
         self.num_kb.target = target
         self.kb_box.addWidget(self.num_kb)
 
-    def check(self):
-        if (
-            self.phone.text().isdigit() and len(self.phone.text()) == 11 and
-            self.password.text().isdigit() and len(self.password.text()) == 6
-        ):
-            self.go_song()
+class LoginPage(QWidget):
+    def __init__(self, go_home, go_song):
+        super().__init__()
+        self.go_home = go_home
+        self.go_song = go_song
+        self.current_input = None
+        self.fail_count = 0  # 🔹 실패 횟수 카운터 초기화
+        self.init_ui()
+        self.reset()
 
+    def reset(self):
+        self.phone.clear()
+        self.password.clear()
+        self.fail_count = 0  # 페이지 진입 시 초기화
+        while self.kb_box.count():
+            item = self.kb_box.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+
+    def on_home_clicked(self):
+        self.reset()
+        self.go_home()
+
+    def init_ui(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+
+        title = QLabel("회원 로그인")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size:28px; color: black; font-weight: bold;")
+
+        self.phone = QLineEdit()
+        self.phone.setPlaceholderText("    전화번호 (숫자 11자리)")
+        self.phone.setMaxLength(11)
+
+        self.password = QLineEdit()
+        self.password.setPlaceholderText("    비밀번호 (숫자 6자리)")
+        self.password.setMaxLength(6)
+
+        for w in (self.phone, self.password):
+            w.setFixedHeight(40)
+            w.setStyleSheet("""
+                QLineEdit {
+                    font-size: 15px;
+                    padding-left: 10px;
+                    background-color: #F2F2F2;
+                    border: 2px solid #BDBDBD;
+                    border-radius: 8px;
+                    color: #212121;
+                }
+                QLineEdit::placeholder { color: black; }
+                QLineEdit:focus {
+                    background-color: #FFFFFF;
+                    border: 2px solid #2F80ED;
+                }
+            """)
+        
+        self.num_kb = NumberKeyboard(None)
+        self.kb_box = QVBoxLayout()
+
+        self.phone.mousePressEvent = lambda e: self.show_num(self.phone)
+        self.password.mousePressEvent = lambda e: self.show_num(self.password)
+
+        btn_ok = QPushButton("확인")
+        btn_home = QPushButton("홈")
+
+        btn_style = """
+            QPushButton {
+                background-color: #213555;
+                color: white;
+                font-size: 18px;
+                font-weight: bold;
+                border-radius: 12px;
+            }
+            QPushButton:pressed { background-color: #068FFF; }
+        """
+        btn_ok.setStyleSheet(btn_style)
+        btn_home.setStyleSheet(btn_style)
+        btn_ok.setFixedSize(140, 45)
+        btn_home.setFixedSize(140, 45)
+
+        btn_ok.clicked.connect(self.check)
+        btn_home.clicked.connect(self.on_home_clicked)
+
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(btn_ok)
+        btn_row.addWidget(btn_home)
+
+        layout.addWidget(title)
+        layout.addWidget(self.phone)
+        layout.addWidget(self.password)
+        layout.addLayout(self.kb_box)
+        layout.addLayout(btn_row)
+        self.setLayout(layout)
+
+    def clear_kb(self):
+        while self.kb_box.count():
+            item = self.kb_box.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+
+    def show_num(self, target):
+        self.current_input = target
+        self.clear_kb()
+        self.num_kb.target = target
+        self.kb_box.addWidget(self.num_kb)
+
+    # ---------- 로그인 체크 및 서버 연동 ----------
+    # kiosk.py 의 LoginPage 클래스 내 check 함수
+    def check(self):
+        import requests
+        phone = self.phone.text().strip()
+        password = self.password.text().strip()
+
+        payload = {
+            "user_id": phone,  # 서버가 이 값을 암호화해서 phone 컬럼과 대조함
+            "password": password
+        }
+
+        print(f"--- 로그인 시도 중: {phone} ---") # 확인용
+
+        try:
+            url = "http://127.0.0.1:8000/users/login"
+            response = requests.post(url, json=payload)
+
+            if response.status_code == 200:
+                print("✅ 로그인 성공!")
+                self.fail_count = 0
+                self.go_song()
+            elif response.status_code == 401:
+                self.fail_count += 1
+                print(f"❌ 로그인 실패 ({self.fail_count}회)")
+                if self.fail_count >= 5:
+                    print("⚠️ 5회 실패! 위로 멘트가 필요합니다.")
+            else:
+                print(f"❓ 서버 응답 오류 ({response.status_code}): {response.text}")
+
+        except Exception as e:
+            print(f"📡 연결 자체가 안 됨: {e}")
 
 
 # ================= 곡 수 선택 =================
